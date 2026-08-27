@@ -1,0 +1,37 @@
+[project]
+name = "ampav-misc"
+dynamic = ["version"]
+description = "Misc tooling for the AMPAV environment"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",   
+]
+authors = [
+    {name = "Brian Wheeler", email="bdwheele@iu.edu"},
+]
+
+requires-python = ">=3.12"
+dependencies = [
+    "ampav-core>=0.0.21",
+    "numpy",
+    "opencv-python"
+]
+
+[project.urls]
+Homepage = "https://github.com/AMPAV/ampav-misc"
+Repository = "https://github.com/AMPAV/ampav-misc.git"
+Issues = "https://github.com/AMPAV/ampav-misc/issues"
+
+
+[project.scripts]
+#ampav_misc_audio_classification = "ampav.misc.audio:cli_misc_audio_classification"
+
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "ampav.misc.__version__"}
