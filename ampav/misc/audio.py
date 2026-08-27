@@ -21,6 +21,18 @@ from PIL import Image, ImageDraw
 def detect_silence(media_file: Path, audio_stream: int=0, 
                    window_millis: int=50, silence_db: float=-40,
                    min_silence_duration: float=0.5) -> ToolOutput:
+    """Detect silence in audio
+
+    Args:
+        media_file (Path): File to process
+        audio_stream (int, optional): Audio stream id. Defaults to 0.
+        window_millis (int, optional): detection window size. Defaults to 50.
+        silence_db (float, optional): Minimum dB for silence. Defaults to -40.
+        min_silence_duration (float, optional): Minimum length in seconds of detected silence. Defaults to 0.5.
+
+    Returns:
+        ToolOutput: A tool output of AudioEffects which indicates where there is silence
+    """
     # detect silence using RMS via numpy
     tool_output = ToolOutput(tool_name='misc-detect-silence',
                              tool_version=__version__,
@@ -78,6 +90,21 @@ def detect_silence(media_file: Path, audio_stream: int=0,
 def generate_waveform_image(media_file: Path, audio_stream: int=0, 
                             height: int=1000, width: int=100, 
                             fg_color='green', bg_color='white') -> Image:
+    """Create an image representing the waveform of the audio file
+
+    Args:
+        media_file (Path): The file to process
+        audio_stream (int, optional): The audio stream ID. Defaults to 0.
+        height (int, optional): Result image height. Defaults to 1000.
+        width (int, optional): Result image width. Defaults to 100.
+        fg_color (str, optional): Color used for the waveform. Defaults to 'green'.
+        bg_color (str, optional): Color used for the background. Defaults to 'white'.
+
+    Returns:
+        Image: A PIL image representing the waveform
+    """
+
+    
     _, _, samples = load_and_resample_audio_file(media_file, audio_stream, channels=1)
 
     chunk_size = math.floor(len(samples) / width)
@@ -104,7 +131,16 @@ FreqResult = namedtuple('FreqResult', ['frequency', 'db'])
 
 def audio_fft(media_file: Path, audio_stream: int=0,
               silence_db: float=-40) -> dict[float, tuple[FreqResult, list[FreqResult]]]:
+    """Perform FFT analysis of the audio
 
+    Args:
+        media_file (Path): The file to process
+        audio_stream (int, optional): the audio stream id. Defaults to 0.
+        silence_db (float, optional): Minimum silence in dB. Defaults to -40.
+
+    Returns:
+        dict[float, tuple[FreqResult, list[FreqResult]]]: A map of times to a tuple of the dominant frequency and a list of the other frequencies detected
+    """
     results = {}
     # resample the audio to mono 44.1KHz so we can detect frequences up to 22.05KHz
     # per the Nyquist frequency rule.
@@ -150,8 +186,7 @@ def cli_fft():
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--debug", action="store_true", help="Enable debugging")
-    parser.add_argument("file", type=Path, help="File to classify")
-    #parser.add_argument("output", type=Path, help="Output file")    
+    parser.add_argument("file", type=Path, help="File to classify") 
     args = parser.parse_args()
     logging.basicConfig(format=LOG_FORMAT, level=logging.DEBUG if args.debug else logging.INFO)
     
@@ -160,13 +195,6 @@ def cli_fft():
         print(f"{k}s    {v[0].frequency}Hz, {v[0].db:.3f}dBFS")
         for r in v[1]:
             print(f"    {r.frequency}Hz, {r.db:.3f}dBFS")
-
-    print(result)
-
-    #logging.info(f"Saving data to {args.output} in PNG format")
-    #result.save(args.output)
-
-
 
 
 def cli_misc_detect_silence():
@@ -187,7 +215,6 @@ def cli_misc_detect_silence():
     dump_data(result, args.format, args.output)
 
 
-
 def cli_misc_waveform_image():
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", action="version", version=__version__)
@@ -202,9 +229,3 @@ def cli_misc_waveform_image():
     result = generate_waveform_image(args.file, 0, height=args.height, width=args.width)
     logging.info(f"Saving data to {args.output} in PNG format")
     result.save(args.output)
-
-
-if __name__ == "__main__":
-    #cli_misc_detect_silence()
-    #cli_misc_waveform_image()
-    cli_fft()

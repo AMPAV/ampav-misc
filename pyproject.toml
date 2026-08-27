@@ -26,8 +26,9 @@ Issues = "https://github.com/AMPAV/ampav-misc/issues"
 
 
 [project.scripts]
-#ampav_misc_audio_classification = "ampav.misc.audio:cli_misc_audio_classification"
-
+ampav_misc_detect_silence = "ampav.misc.audio:cli_misc_detect_silence"
+ampav_misc_waveform_image = "ampav.misc.audio:cli_misc_waveform_image"
+ampav_misc_fft = "ampav.misc.audio:cli_fft"
 
 [build-system]
 requires = ["setuptools"]

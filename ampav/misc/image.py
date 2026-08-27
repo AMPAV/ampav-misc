@@ -54,38 +54,73 @@ def is_smpte_colorbars(img: Image.Image):
               'magenta': (300, 100, 75)}
 
     def hue(val):
-        return max([0, min([255, int(256 * (((360 + val) % 360) / 360))])])
+        return max([0, min([255, int(255 * (((360 + val) % 360) / 360))])])
+
         
     def scale(val):
-        return max([0, min([255, int(256 * (val / 100))])])
+        return max([0, min([255, int(255 * (val / 100))])])
 
-    def color2range(name: str, t):
-        c = colors[name]
-        return [(hue(c[0] - t), scale(c[1] - t), scale(c[2] - t)),
-                (hue(c[0] + t), scale(c[1] + t), scale(c[2] + t))]
+    def color2range(name: str, hue_t, sat_t, val_t):
+        if name == 'white':
+            c = colors[name]
+            return[(0, scale(c[1] - sat_t), scale(c[2] - val_t)),
+                   (255, scale(c[1] + sat_t), scale(c[2] + val_t))]
+        else:
+            c = colors[name]
+            return [(hue(c[0] - hue_t), scale(c[1] - sat_t), scale(c[2] - val_t)),
+                    (hue(c[0] + hue_t), scale(c[1] + sat_t), scale(c[2] + val_t))]
 
-    
-    hsv = np.array(img.convert('HSV'))
-
+    # we're going to quantize the image to 13 colors
+    qimg = img.quantize(220)
+    hsv = np.array(qimg.convert('HSV'))
+    res = {}
     for k, v in colors.items():
-        rng = color2range(k, 10)
-        print(k, v, rng)
+        rng = color2range(k, 10, 35, 25)
+        #print(k, v, rng)
         if rng[0][0] > rng[1][0]:
-            # we wrapped around the hue angle
-            mask = cv2.inRange(hsv, (hue(0), scale(0), scale(65)), (hue(10), scale(10), scale(85)))
-
+            # we wrapped around the hue angle, so we have to split it across
+            # the boundary
+            mask1 = cv2.inRange(hsv, (rng[0][0], rng[0][1], rng[0][2]), (255, rng[1][1], rng[1][2]))
+            mask2 = cv2.inRange(hsv, (0, rng[0][1], rng[0][2]), (rng[1][0], rng[1][1], rng[1][2]))
+            #cv2.imshow("Mask 1", mask1)
+            #cv2.imshow("Mask 2", mask2)
+            #cv2.waitKey(0)
+            #cv2.destroyAllWindows()
+            mask = cv2.bitwise_or(mask1, mask2)
         else:
             mask = cv2.inRange(hsv, *rng)
 
-        cv2.imshow(k, mask)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+
+
+
+ 
+        #cv2.imshow(k, mask)
+        #cv2.waitKey(0)
+        #cv2.destroyAllWindows()
+        
+
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        
+        res[k] = []
         for cnt in contours:
-            print(cnt)
+            
+            epsilon = 0.02 * cv2.arcLength(cnt, True)
+            approx = cv2.approxPolyDP(cnt, epsilon, True)
+            if len(approx) >= 3:
+                print(approx.tolist())
+            scnt = approx
+            
+            scnt = cnt.tolist()
+            scnt = [x[0] for x in scnt]
+            res[k].append(scnt)
 
 
+
+            
+
+    return qimg, res
 
 if __name__ == "__main__":
     i = Image.open("/home/bdwheele/work_projects/AMPAV/SMPTE_COLOR_BAR_75.png")
