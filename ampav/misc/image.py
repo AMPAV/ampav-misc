@@ -1,10 +1,12 @@
 #!/bin/env python3
 from collections import namedtuple
+from typing import Any
 
 from PIL import Image, ImageDraw
 import numpy as np
 import cv2
-from shapely import Polygon
+from shapely import Point, Polygon
+import shapely
 import logging
 
 def is_black_image(img: Image.Image, 
@@ -50,7 +52,7 @@ def get_dominant_color(img: Image.Image) -> int | tuple:
 def is_smpte_colorbars(img: Image.Image,
                        hue_tolerance: float=10,
                        sat_tolerance: float=15,
-                       val_tolerance: float=25):
+                       val_tolerance: float=25) -> tuple[bool, dict[str, Any], Image.Image]:
     # we need the image in HSV since we're looking for specific color ranges
     HSV = namedtuple("HSV", ['h', 's', 'v'])
     ColorSpec = namedtuple('ColorSpec', ['match', 'fg'])
@@ -104,7 +106,6 @@ def is_smpte_colorbars(img: Image.Image,
     # build the masks for each of the colors we're looking for and get the
     # polygons.
     res: dict[str, list[Polygon]] = {}
-    
     for k in colors:
         fill_color = f"hsv({colors[k].match.h}, {colors[k].match.s}%, {colors[k].match.v}%)"
         text_color = colors[k].fg
@@ -140,15 +141,213 @@ def is_smpte_colorbars(img: Image.Image,
                 # filter out polygons which are less than 1/4 of a castellation
                 # blob...which is being pretty generous
                 if p.area < castellation_area * 0.25:
-                    logging.debug(f"{k} poly {found_polys} has area {p.area} which is less than 1/4 of {castellation_area}")
+                    #logging.debug(f"{k} poly {found_polys} has area {p.area} which is less than 1/4 of {castellation_area}")
                     continue    
-                logging.debug(f"{k} poly {found_polys} has area {p.area} and center at {p.centroid}")
+                #logging.debug(f"{k} poly {found_polys} has area {p.area} and center at {p.centroid}")
                 res[k].append(p)
                 debugimg.polygon(p.exterior.coords, fill=fill_color)
                 debugimg.text((p.centroid.x, p.centroid.y), str(found_polys), fill=text_color)
                 found_polys += 1
 
-    return res, qimg
+    # Now that we have the polygons, let's see if these things are actually 
+    # something resembling a colorbar image
+    tests: dict[str, Any] = {}
+
+    # test properties that apply to all colors. this is an inefficient way to 
+    # do it, but it allows me to debug it a whole lot easier.    
+    for test_num in range(20):
+        test_list = []
+        test_dict = {}
+        # gather the per-color summary
+        for color in ('white', 'yellow', 'cyan', 'green', 'magenta', 'red', 'blue'):
+            match test_num:
+                case 0:
+                    # Make sure that all of the colors are present.                    
+                    #logging.debug(f"{color} has {len(res[color])} polygons")
+                    test_list.append(1 if len(res[color]) > 0 else 0)                    
+                case 1:
+                    # make sure there is at least 1 polygon centered in the 
+                    # upper 2/3 of the frame.
+                    t = False
+                    for p in res[color]:
+                        t |= p.centroid.y <= qimg.height * 0.67
+                    
+                    #logging.debug(f"{color} has a poly in the top 2/3? {t}")
+                    test_list.append(1 if t else 0)
+                case 2:
+                    # the sum of the areas for each polygon centered in 
+                    # the upper 2/3 must be at least some fraction of the area 
+                    # of a standard color bar. 
+                    
+                    for k, v in  {'1/4': 1/4, '1/3': 1/3, '1/2': 1/2, '2/3': 2/3, '3/4': 3/4}.items():
+                        t = 0
+                        for p in res[color]:
+                            if p.centroid.y <= qimg.height * 0.67:
+                                t += p.area
+                        #logging.debug(f"{color} has area of {t}, vs {bar_area * v}")
+                        if k not in test_dict:
+                            test_dict[k] = []
+                        test_dict[k].append(1 if t >= bar_area * v else 0)
+                    
+                case 3:
+                    # color bar order should be left to right
+                    t = 0
+                    c = 0
+                    for p in res[color]:
+                        if p.centroid.y <= qimg.height * 0.67:
+                            t += p.centroid.x
+                            c += 1
+                    if c:
+                        #logging.debug(f"{color} has an average x of {t/c}")
+                        test_list.append(t / c)
+                    else:
+                        test_list.append(-1)
+
+                case 4:
+                    # check if we have the full white spot.  We're going to look
+                    # for a polygon that's at least 50% of the size of the spot
+                    # in the adjustment zone, and the center is fairly close to
+                    # where we expect it.
+                    if color == "white":
+                        v = 0
+                        for p in res[color]:
+                            if p.centroid.y >= qimg.height * 0.75:
+                                #logging.debug(f"Polygon {p} is in the adjustment area")
+                                if p.area >= adjustment_area * 0.5:
+                                    #logging.debug(f"Polygon {p} is at least 50% of the fullwhite")
+                                    adj_width = qimg.width / 5.5
+                                    dist = shapely.distance(p.centroid, Point(int(1.5 * adj_width), int(qimg.height * 0.87)))
+                                    if dist < adj_width / 4:
+                                        #logging.debug(f"Distance: {dist}, {adj_width / 4}")
+                                        v = 1.0
+                                    
+                        test_list.append(v)
+                case 5:
+                    # check for the appropriate colors in the castellation
+                    if color in ('blue', 'magenta', 'cyan', 'white'):
+                        for p in res[color]:
+                            # check for a polygon within the 8%.
+                            if qimg.height * 0.67 <= p.centroid.y <= qimg.height * 0.75:
+                                #logging.debug(f"{color} Polygon {p} appears in the castellation band")
+                                test_list.append(1.0)
+                            else:
+                                test_list.append(0)
+                case 6:
+                    # check for the appropriate order of castellation colors
+                    if color in ('blue', 'magenta', 'cyan', 'white'):
+                        t = 0
+                        c = 0
+                        for p in res[color]:
+                            # check for a polygon within the 8%.
+                            if qimg.height * 0.67 <= p.centroid.y <= qimg.height * 0.75:
+                                #logging.debug(f"{color} Polygon {p} appears in the castellation band")
+                                t += p.centroid.x
+                                c += 1
+                        if c:
+                            test_list.append(t / c)
+                        else:
+                            test_list.append(-1)
+
+                case 7:
+                    # castellation bar area
+                    if color in ('blue', 'magenta', 'cyan', 'white'):
+                        for k, v in  {'1/4': 1/4, '1/3': 1/3, '1/2': 1/2, '2/3': 2/3, '3/4': 3/4}.items():
+                            t = 0
+                            for p in res[color]:
+                                if qimg.height * 0.67 <= p.centroid.y <= qimg.height * 0.75:
+                                    t += p.area
+                            logging.debug(f"castellation {color} has area of {t}, vs {castellation_area * v}")
+                            if k not in test_dict:
+                                test_dict[k] = []
+                            test_dict[k].append(1 if t >= castellation_area * v else 0)
+
+
+        def get_ascending(x: list):
+            c = 0
+            last = -1
+            for v in x:
+                if v > last:
+                    c += 1
+                    last = v
+                elif v == -1:
+                    c += 1
+                else:
+                    break
+            logging.debug(f"Get ascending: {x} = {c}")
+            return c
+
+        # do something with the summary
+        match test_num:
+            case 0:
+                tests['colors_in_frame']= sum(test_list) / 7
+            case 1:
+                tests['colors_in_top_2/3'] = sum(test_list) / 7
+            case 2:                
+                tests['primary_bar_area'] = {}
+                for k, v in test_dict.items():                    
+                    tests['primary_bar_area'][k] = sum(test_dict[k]) / 7    
+            case 3:
+                #tests['colors_in_correct_order'] = len(test_list)/7 if test_list == sorted(test_list) else 0
+                tests['colors_in_correct_order'] = get_ascending(test_list) / 7
+            case 4:
+                tests['fullwhite_spot'] = test_list[0]
+            case 5:
+                tests['castellation_colors'] = sum(test_list) / 4
+            case 6:
+                # the castellation colors are in the opposite order as the main color bars.
+                test_list.reverse()
+                tests['castellation_order'] = get_ascending(test_list) / 4
+            case 7:
+                tests['castellation_bar_area'] = {}
+                for k, v in test_dict.items():                    
+                    tests['castellation_bar_area'][k] = sum(test_dict[k]) / 4
+
+
+    # Now that we have all of the test data, let's make a determination. 
+    # The base cutoff is:  we have to have 5 of the 7 bars in the top 2/3 and
+    # they have to be in order.
+    res = False
+    if tests['colors_in_top_2/3'] >= 5/7 and int(tests['colors_in_correct_order']) == 1:
+        # now we have to make sure that those color bars are a reasonable
+        # percentage of the area we're expecting. And that really depends on
+        # whether or not we have the fullwhite and castellation.  
+        if int(tests['fullwhite_spot']) == 1:
+            # with a fullwhite spot the color bars can be 75% height if there's
+            # no castellation or "normal sized" at 67% if there is.
+            # But how do we determine if there's castellation?  I'm going to 
+            # say two of the castellation colors have to be there in the
+            # right order. That's possible because they're in the opposite order
+            # of the main colorbars so there's no confusion.
+            if tests['castellation_colors'] >= 0.5 and int(tests['castellation_order']) == 1:
+                # the bars are regular size, so we're going to compare against
+                # the 1/3 and 1/2 sizes - 5 of 7 and 3 of 7, respectively
+                if tests['primary_bar_area']['1/3'] >= 4/7 and tests['primary_bar_area']['1/2'] >= 3/7:
+                    res = True
+                else:
+                    res = False
+            else:
+                # we're going to use the same percentages as above, but we're
+                # going to be more generous on the number of bars that need
+                # to match -- 3 & 3 
+                if tests['primary_bar_area']['1/3'] >= 3/7 and tests['primary_bar_area']['1/2'] >= 3/7:
+                    res = True
+                else:
+                    res = False
+
+        else:
+            # we're not going to have castellation without a fullwhite so
+            # there's a reasonable assumption that the bars extend from
+            # top to bottom.  In that case, we want to use a larger percentage
+            # of what would normally the 2/3 height bar.  
+            # we'd like 5/7 bars to be at least 1/3 (which is 1/2 of a 2/3 bar)
+            # and 3/7 of the bars to be at least half full, so 3/4 of 2/3
+            if tests['primary_bar_area']['1/2'] >= 4/7 and tests['primary_bar_area']['3/4'] >= 3/7:
+                res = True
+            else:
+                res = False
+        
+    tests['is_colorbars'] = res
+    return res, tests, qimg
 
 if __name__ == "__main__":
     i = Image.open("/home/bdwheele/work_projects/AMPAV/SMPTE_COLOR_BAR_75.png")

@@ -18,11 +18,11 @@ def detect_colorbars(filename: Path):
                       'dominant_frequency_db': v[0].db}
     for k, v in get_frames_from_video(filename, 0, list(results.keys())).items():        
         results[k]['frame'] = v
-        points, qimg = is_smpte_colorbars(v.image)
+        res, tests, qimg = is_smpte_colorbars(v.image)
                    
         results[k]['id_frame'] = qimg
 
-        results[k]['contours'] = {clr: len(pts) for clr, pts in points.items()}
+        results[k]['tests'] = tests
 
         #results[k]['smpte_points'] = points 
 
