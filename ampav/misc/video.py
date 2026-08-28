@@ -1,5 +1,7 @@
 #!/bin/env python3
 
+import logging
+from ampav.core.logging import LOG_FORMAT
 from ampav.misc.image import is_smpte_colorbars
 from ampav.misc.audio import audio_fft
 from ampav.core.media import get_frames_from_video
@@ -16,27 +18,8 @@ def detect_colorbars(filename: Path):
                       'dominant_frequency_db': v[0].db}
     for k, v in get_frames_from_video(filename, 0, list(results.keys())).items():        
         results[k]['frame'] = v
-        qimg, points = is_smpte_colorbars(v.image)
-        tmpimg = ImageDraw.Draw(qimg)
-        j = 0
-        for c, cnt in points.items():            
-            for contour in cnt:
-                if len(contour) >= 4:
-                    p = Polygon(contour)
-                    print(c, p.area, p.centroid)
-                    tmpimg.text((p.centroid.x, p.centroid.y), str(j), fill=c)
-                j += 1
-                p2 = None
-                p1 = contour[0]
-                i = 1
-                while i < len(contour):
-                    p2 = contour[i]
-                    i += 1
-                    tmpimg.line((p1, p2), width=1, fill=c)
-                    p1 = p2
-                if p2 is not None:
-                    tmpimg.line((contour[0], p2), width=1, fill=c)
-                        
+        points, qimg = is_smpte_colorbars(v.image)
+                   
         results[k]['id_frame'] = qimg
 
         results[k]['contours'] = {clr: len(pts) for clr, pts in points.items()}
@@ -51,6 +34,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("infile", type=Path)
     parser.add_argument("outfile", type=Path)
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
+    logging.basicConfig(format=LOG_FORMAT, level=logging.DEBUG if args.debug else logging.INFO)
 
     args.outfile.write_text(render_html(detect_colorbars(args.infile),str(args.infile)))

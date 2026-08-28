@@ -16,7 +16,8 @@ requires-python = ">=3.12"
 dependencies = [
     "ampav-core>=0.0.21",
     "numpy",
-    "opencv-python"
+    "opencv-python",
+    "shapely"
 ]
 
 [project.urls]
