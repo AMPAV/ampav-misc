@@ -10,25 +10,25 @@ import shapely
 import logging
 
 def is_black_image(img: Image.Image, 
-                   luma_threshhold: float=0.1,
-                   frame_threshhold: float=0.95) -> bool:
+                   luma_threshold: float=0.1,
+                   frame_threshold: float=0.95) -> bool:
     """Return true if the image is "black"
 
     Args:
         img (Image.Image): PIL Image to test
-        luma_threshhold (float, optional): percentage of luma to count as black. Defaults to 0.1.
-        frame_threshhold (float, optional): percentage of pixels in the frame that must be below the luma_threshhold. Defaults to 0.95.
+        luma_threshold (float, optional): percentage of luma to count as black. Defaults to 0.1.
+        frame_threshold (float, optional): percentage of pixels in the frame that must be below the luma_threshold. Defaults to 0.95.
 
     Returns:
         bool: True if the image is black
     """
     pixel_count = img.width * img.height
     black_count = 0
-    luma_val = int(luma_threshhold * 256)
+    luma_val = int(luma_threshold * 256)
     for p in img.convert('L').get_flattened_data():
         if p <= luma_val:
             black_count +=1
-    return black_count / pixel_count >= frame_threshhold
+    return black_count / pixel_count >= frame_threshold
 
 
 def get_dominant_color(img: Image.Image) -> int | tuple:
@@ -47,6 +47,26 @@ def get_dominant_color(img: Image.Image) -> int | tuple:
             bins[p] = 0
         bins[p] += 1
     return max(bins, key=bins.get)
+
+
+def get_dominant_hue(img: Image.Image) -> int:
+    """Get the dominant hue angle for an image
+
+    Args:
+        img (Image.Image): An image to test
+
+    Returns:
+        int: The dominant color's hue angle
+    """
+    hsvimage = img.convert('HSV')
+    bins = {}
+    for p in hsvimage.get_flattened_data(0):
+        if p not in bins:
+            bins[p] = 0
+        bins[p] += 1
+    return int(360 * (max(bins, key=bins.get) / 255))
+
+
 
 
 def is_smpte_colorbars(img: Image.Image,
@@ -352,3 +372,6 @@ def is_smpte_colorbars(img: Image.Image,
 if __name__ == "__main__":
     i = Image.open("/home/bdwheele/work_projects/AMPAV/SMPTE_COLOR_BAR_75.png")
     print(is_smpte_colorbars(i))
+    i = Image.open("/home/bdwheele/Documents/yellow.png")
+
+    print(get_dominant_hue(i))
