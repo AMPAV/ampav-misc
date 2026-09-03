@@ -2,7 +2,7 @@
 from collections import namedtuple
 from typing import Any
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageChops
 import numpy as np
 import cv2
 from shapely import Point, Polygon
@@ -67,12 +67,11 @@ def get_dominant_hue(img: Image.Image) -> int:
     return int(360 * (max(bins, key=bins.get) / 255))
 
 
-
-
 def is_smpte_colorbars(img: Image.Image,
                        hue_tolerance: float=10,
-                       sat_tolerance: float=15,
+                       sat_tolerance: float=25,
                        val_tolerance: float=25) -> tuple[bool, dict[str, Any], Image.Image]:
+
     # we need the image in HSV since we're looking for specific color ranges
     HSV = namedtuple("HSV", ['h', 's', 'v'])
     ColorSpec = namedtuple('ColorSpec', ['match', 'fg'])
@@ -108,7 +107,22 @@ def is_smpte_colorbars(img: Image.Image,
         else:
             return (HSV(scale_hue(c.h - hue_t), scale(c.s - sat_t), scale(c.v - val_t)),
                     HSV(scale_hue(c.h + hue_t), scale(c.s + sat_t), scale(c.v + val_t)))
- 
+
+    # the image needs to have black side bars removed since sometimes we have
+    # images where it's a 4:3 on a 16:9 frame (pillarboxed) or there's additional
+    # space vertically (such as during vertical retrace)
+    # create a pure black frame
+    background = Image.new(img.mode, img.size, (0, 0, 0))
+    # get the difference
+    difference = ImageChops.difference(img, background)
+    # subtract our threshold
+    difference = ImageChops.add(difference, difference, 2.0, -50)
+    # get the bounding box of the content and if it's valid, crop the
+    # frame for future operations.
+    bbox = difference.getbbox()
+    if bbox:
+        img = img.crop(bbox)
+
     # quantize the image and then convert it to an HSV array.
     qimg = img.quantize(220)
     hsv = np.array(qimg.convert('HSV'))
@@ -117,11 +131,11 @@ def is_smpte_colorbars(img: Image.Image,
     # overall area of the image so we can filter out really small polygons and
     # determine our "ideal" section areas.
     debugimg = ImageDraw.Draw(qimg)
-    frame_area = qimg.width * qimg.height  # the whole frame
-    bar_area = (qimg.width / 7) * (qimg.height * 0.67)  # area of one color bar
+    bar_area = (qimg.width / 7) * qimg.height # one full color bar
+    bar_width = int(qimg.width / 7)
+    bar_order = ['white', 'yellow', 'cyan', 'green', 'magenta', 'red', 'blue']
     castellation_area = (qimg.width / 7) * (qimg.height * 0.08) # castellation bar area
     adjustment_area = (qimg.height * 0.25) * (qimg.width / 5.5) # i, fullwhite, q areas
-
 
     # build the masks for each of the colors we're looking for and get the
     # polygons.
@@ -179,7 +193,7 @@ def is_smpte_colorbars(img: Image.Image,
         test_list = []
         test_dict = {}
         # gather the per-color summary
-        for color in ('white', 'yellow', 'cyan', 'green', 'magenta', 'red', 'blue'):
+        for color in bar_order:
             match test_num:
                 case 0:
                     # Make sure that all of the colors are present.                    
@@ -195,14 +209,16 @@ def is_smpte_colorbars(img: Image.Image,
                     #logging.debug(f"{color} has a poly in the top 2/3? {t}")
                     test_list.append(1 if t else 0)
                 case 2:
-                    # the sum of the areas for each polygon centered in 
-                    # the upper 2/3 must be at least some fraction of the area 
-                    # of a standard color bar. 
-                    
-                    for k, v in  {'1/4': 1/4, '1/3': 1/3, '1/2': 1/2, '2/3': 2/3, '3/4': 3/4}.items():
+                    # the sum of the areas for each polygon centered within
+                    # the x range for that bar.
+                    for k, v in  {'1/4': 1/4, '1/3': 1/3, '1/2': 1/2, '2/3': 2/3, '3/4': 3/4,
+                                  '1/4-67': 0.67 * 1/4, '1/3-67': 0.67 * 1/3, '1/2-67': 0.67 * 1/2, '2/3-67': 0.67 * 2/3, '3/4-67': 0.67 * 3/4,
+                                  '1/4-75': 0.75 * 1/4, '1/3-75': 0.75 * 1/3, '1/2-75': 0.75 * 1/2, '2/3-75': 0.75 * 2/3, '3/4-75': 0.75 * 3/4,}.items():
                         t = 0
                         for p in res[color]:
-                            if p.centroid.y <= qimg.height * 0.67:
+                            #if p.centroid.y <= qimg.height * 0.67:
+                            #    t += p.area
+                            if bar_order.index(color) * bar_width <= p.centroid.x <= (bar_order.index(color) + 1) * bar_width:
                                 t += p.area
                         #logging.debug(f"{color} has area of {t}, vs {bar_area * v}")
                         if k not in test_dict:
@@ -325,7 +341,7 @@ def is_smpte_colorbars(img: Image.Image,
 
     # Now that we have all of the test data, let's make a determination. 
     # The base cutoff is:  we have to have 5 of the 7 bars in the top 2/3 and
-    # they have to be in order.
+    # those have to be in order.
     res = False
     if tests['colors_in_top_2/3'] >= 5/7 and int(tests['colors_in_correct_order']) == 1:
         # now we have to make sure that those color bars are a reasonable
@@ -340,28 +356,32 @@ def is_smpte_colorbars(img: Image.Image,
             # of the main colorbars so there's no confusion.
             if tests['castellation_colors'] >= 0.5 and int(tests['castellation_order']) == 1:
                 # the bars are regular size, so we're going to compare against
-                # the 1/3 and 1/2 sizes - 5 of 7 and 3 of 7, respectively
-                if tests['primary_bar_area']['1/3'] >= 4/7 and tests['primary_bar_area']['1/2'] >= 3/7:
+                # the 1/4, 1/2, and 3/4 sizes
+                if all([tests['primary_bar_area']['1/4-67'] >= 5/7,
+                        tests['primary_bar_area']['1/2-67'] >= 4/7,
+                        tests['primary_bar_area']['2/3-67'] >= 3/7]):
                     res = True
                 else:
                     res = False
             else:
-                # we're going to use the same percentages as above, but we're
-                # going to be more generous on the number of bars that need
-                # to match -- 3 & 3 
-                if tests['primary_bar_area']['1/3'] >= 3/7 and tests['primary_bar_area']['1/2'] >= 3/7:
+                # If we don't have castellation, then the bars may extend to
+                # 75% ... so it's the same as above
+                if all([tests['primary_bar_area']['1/4-75'] >= 5/7,
+                        tests['primary_bar_area']['1/2-75'] >= 4/7,
+                        tests['primary_bar_area']['2/3-75'] >= 3/7]):
                     res = True
                 else:
                     res = False
-
+                
         else:
             # we're not going to have castellation without a fullwhite so
             # there's a reasonable assumption that the bars extend from
-            # top to bottom.  In that case, we want to use a larger percentage
-            # of what would normally the 2/3 height bar.  
-            # we'd like 5/7 bars to be at least 1/3 (which is 1/2 of a 2/3 bar)
-            # and 3/7 of the bars to be at least half full, so 3/4 of 2/3
-            if tests['primary_bar_area']['1/2'] >= 4/7 and tests['primary_bar_area']['3/4'] >= 3/7:
+            # top to bottom.
+            #  At least 5 bars must be 1/4 of the area, 4 of them should be at 
+            # least 1/2 and 3 of them should be 3/4
+            if all([tests['primary_bar_area']['1/4'] >= 5/7,
+                    tests['primary_bar_area']['1/2'] >= 4/7,
+                    tests['primary_bar_area']['2/3'] >= 3/7]):
                 res = True
             else:
                 res = False
