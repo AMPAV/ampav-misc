@@ -70,7 +70,20 @@ def get_dominant_hue(img: Image.Image) -> int:
 def is_smpte_colorbars(img: Image.Image,
                        hue_tolerance: float=10,
                        sat_tolerance: float=25,
-                       val_tolerance: float=25) -> tuple[bool, dict[str, Any], Image.Image]:
+                       val_tolerance: float=25,
+                       debug_info: dict | None=None) -> bool:
+    """Detect whether or not an image is SMPTE color bars (or similar)
+
+    Args:
+        img (Image.Image): Frame image to check
+        hue_tolerance (float, optional): Hue variation tolerance degrees. Defaults to 10.
+        sat_tolerance (float, optional): Saturation variation tolerance percent. Defaults to 25.
+        val_tolerance (float, optional): Value variation tolernace percent. Defaults to 25.
+        debug_info (dict, optional): If set to a dict, populate with debugging information
+        
+    Returns:
+        bool: True if the image is color bars
+    """
 
     # we need the image in HSV since we're looking for specific color ranges
     HSV = namedtuple("HSV", ['h', 's', 'v'])
@@ -387,7 +400,14 @@ def is_smpte_colorbars(img: Image.Image,
                 res = False
         
     tests['is_colorbars'] = res
-    return res, tests, qimg
+
+    if debug_info is not None:
+        debug_info['qc_frame'] = qimg
+        debug_info['tests'] = tests
+
+    return tests['is_colorbars']
+
+
 
 if __name__ == "__main__":
     i = Image.open("/home/bdwheele/work_projects/AMPAV/SMPTE_COLOR_BAR_75.png")

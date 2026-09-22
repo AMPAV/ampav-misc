@@ -30,6 +30,9 @@ Issues = "https://github.com/AMPAV/ampav-misc/issues"
 ampav_misc_detect_silence = "ampav.misc.audio:cli_misc_detect_silence"
 ampav_misc_waveform_image = "ampav.misc.audio:cli_misc_waveform_image"
 ampav_misc_fft = "ampav.misc.audio:cli_fft"
+ampav_misc_detect_colorbars = "ampav.misc.video:cli_detect_colorbars"
+ampav_misc_generate_contact_sheet = "ampav.misc.video:cli_generate_contact_sheet"
+
 
 [build-system]
 requires = ["setuptools"]
